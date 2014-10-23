@@ -7,7 +7,7 @@ RE_STRING_DELIMITER = re.compile('\\W')
 
 class GotoSelectionCommand(sublime_plugin.WindowCommand):
 
-	def run(self, scope=""):
+	def run(self, scope="", prefix="", postfix=""):
 		view = self.window.active_view()
 		selection = view.sel()
 		if selection and len(selection) == 1:
@@ -15,7 +15,7 @@ class GotoSelectionCommand(sublime_plugin.WindowCommand):
 
 			text = self.get_text(view, selection)
 			text = self.filter_text(text)
-			text = scope + text
+			text = scope + prefix + text + postfix
 
 			self.window.run_command("show_overlay", {"overlay": "goto", "text": text})
 			# In ST2 2187, show_overlay with a text parameter doesn't select an item, you have to navigate down arrow to select the first item.
