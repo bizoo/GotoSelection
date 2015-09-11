@@ -7,18 +7,21 @@ RE_STRING_DELIMITER = re.compile('\\W')
 
 class GotoSelectionCommand(sublime_plugin.WindowCommand):
 
-	def run(self, scope="", prefix="", postfix=""):
+	def run(self, scope="", prefix="", postfix="", **kwargs):
+		self.prefix = prefix
+		self.postfix = postfix
 		view = self.window.active_view()
 		selection = view.sel()
 		if selection and len(selection) == 1:
 			selection = selection[0]
 
 			text = self.get_text(view, selection)
-			text = self.filter_text(text)
-			text = scope + prefix + text + postfix
+			if text is None:
+				return
+			text = scope + text
 
 			self.window.run_command("show_overlay", {"overlay": "goto", "text": text})
-			# In ST2 2187, show_overlay with a text parameter doesn't select an item, you have to navigate down arrow to select the first item.
+			# In ST2 2187, show_overlay with a text parameter doesn't select an item, you have to hit down arrow to select the first item.
 			# So there is no more issue with TRANSIENT view.
 			# Workaround ST2 bug (2170):
 			# When a file open in TRANSIENT mode with the first call to show_overlay, the overlay is automaticaly closed (or become invisible ?).
@@ -33,7 +36,7 @@ class GotoSelectionCommand(sublime_plugin.WindowCommand):
 			region = view.word(selection)
 		else:
 			region = selection
-		return view.substr(region)
+		return self.prefix + self.filter_text(view.substr(region)) + self.postfix
 
 	def filter_text(self, text):
 		return text
@@ -41,9 +44,26 @@ class GotoSelectionCommand(sublime_plugin.WindowCommand):
 
 class GotoSelectionFileCommand(GotoSelectionCommand):
 
+	def run(self, extension="", **kwargs):
+		self.extension = extension
+		super().run(**kwargs)
+
+	def try_open_file(self, filename):
+		if os.path.exists(filename):
+			self.window.open_file(filename)
+			return True
+
 	def get_text(self, view, selection):
+		# get current view path
+		if view.file_name():
+			filename = view.file_name()
+			viewpath, _ = os.path.split(filename)
+		else:
+			filename = ""
+			viewpath = ""
 		if selection.empty():
 			# if cursor is in a string, get the content without string delimiter
+			# dont't add prefix, postfix and extension strings
 			if view.score_selector(selection.begin(), "string") > 0:
 				region = view.extract_scope(selection.begin())
 				text = view.substr(region)
@@ -53,21 +73,24 @@ class GotoSelectionFileCommand(GotoSelectionCommand):
 						text = text[1:-1]
 					else:
 						break
-				return text
-			# As 2219, doesn't work. You can't specify both file and item name ("@").
-			# elif view.score_selector(selection.begin(), "source.plsql.oracle") > 0:
-			# 	region = view.word(selection)
-			# 	package = view.substr(region)
-			# 	print package, view.substr(region.end())
-			# 	if view.substr(region.end()) == ".":
-			# 		method = view.substr(view.word(region.end() + 1))
-			# 	else:
-			# 		method = None
-			# 	return package + "@" + method
-		return super(GotoSelectionFileCommand, self).get_text(view, selection)
+				# Try if string is an absolute path, or a relative (to the current file path) path
+				testpath = os.path.normpath(os.path.join(viewpath, text))
+				if testpath.lower() != view.file_name().lower() and self.try_open_file(testpath):
+					# It's an existing file, stop here
+					return
 
-	def filter_text(self, text):
-		text = super(GotoSelectionFileCommand, self).filter_text(text)
+		# try current directory
+		text = super().get_text(view, selection)
+		if not text.lower().endswith(self.extension.lower()):
+			text = text + self.extension
+		testpath = os.path.normpath(os.path.join(viewpath, text))
+		if testpath.lower() != filename.lower() and self.try_open_file(testpath):
+			# It's an existing file, stop here
+			return
+
+		return self._filter_text_for_st(text)
+
+	def _filter_text_for_st(self, text):
 		# filter begining path until last ..
 		path, filename = os.path.split(text)
 		path = path.rpartition("..")[2]
